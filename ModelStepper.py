@@ -96,9 +96,6 @@ class ModelStepper:
         return base_grads, test_grads
 
     def _step_batch(self, batch_idx, base_batch_data, test_batch_data):
-        self.base_eng.optimizer.zero_grad()
-        self.test_eng.optimizer.zero_grad()
-
         # Should we test parameters/loss/gradients this batch?
         test_batch = (batch_idx %
                       self.test_every == 0) or (batch_idx == self.num_batches - 1)
