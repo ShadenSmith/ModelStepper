@@ -1,6 +1,6 @@
-
 import torch.nn as nn
 import torch.nn.functional as F
+
 
 # Taken from CIFAR example
 class SimpleNet(nn.Module):
@@ -24,4 +24,3 @@ class SimpleNet(nn.Module):
         x = F.relu(self.fc2(x))
         x = self.fc3(x)
         return self.loss_fn(x, y)
-

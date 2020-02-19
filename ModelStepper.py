@@ -10,7 +10,6 @@ import torch.distributed as dist
 import deepspeed
 
 
-
 def abs_diff(A, B):
     """ Compute the norm of the difference between A and B. """
     if type(A) == float:
@@ -18,6 +17,7 @@ def abs_diff(A, B):
     else:
         # Try some Tensor-derived type
         return (B - A).norm()
+
 
 def rel_diff(A, B):
     """ Compute the relative (percent) difference between A and B. """
@@ -37,8 +37,8 @@ class ModelStepper:
         self.print_checks = True
 
         self.track_params = True
-        self.track_loss   = True
-        self.track_grads  = True
+        self.track_loss = True
+        self.track_grads = True
 
         self.global_rank = dist.get_rank()
         self.device = self.base_eng.device
@@ -47,7 +47,6 @@ class ModelStepper:
         self.test_loss = -1.
 
         assert self.base_eng.global_rank == self.test_eng.global_rank
-
 
     def step_batch(self, inputs, labels):
         # Prepare identical baseline and test data
@@ -71,21 +70,33 @@ class ModelStepper:
 
     def get_params(self):
         # XXX TODO: there should be a gather here if eng.mpu is not None
-        base_params = [p for p in self.base_eng.module.parameters() if p.requires_grad]
-        test_params = [p for p in self.test_eng.module.parameters() if p.requires_grad]
+        base_params = [
+            p for p in self.base_eng.module.parameters() if p.requires_grad
+        ]
+        test_params = [
+            p for p in self.test_eng.module.parameters() if p.requires_grad
+        ]
         assert len(base_params) == len(test_params)
         return base_params, test_params
 
     def get_grads(self):
         # XXX TODO: there should be a gather here if eng.mpu is not None
-        base_grads = [p for p in self.base_eng.module.parameters() if p.requires_grad]
-        test_grads = [p for p in self.test_eng.module.parameters() if p.requires_grad]
+        base_grads = [
+            p for p in self.base_eng.module.parameters() if p.requires_grad
+        ]
+        test_grads = [
+            p for p in self.test_eng.module.parameters() if p.requires_grad
+        ]
         assert len(base_grads) == len(test_grads)
         return base_grads, test_grads
 
-
-    def go(self, num_batches=10, test_every=1, status_every=1, param_tol=1e-2,
-           loss_tol=1e-4, grad_tol=1e-2):
+    def go(self,
+           num_batches=10,
+           test_every=1,
+           status_every=1,
+           param_tol=1e-2,
+           loss_tol=1e-4,
+           grad_tol=1e-2):
         for batch_idx, data in enumerate(self.loader):
             if batch_idx == num_batches:
                 break
@@ -95,16 +106,17 @@ class ModelStepper:
             self.step_batch(inputs, labels)
 
             if batch_idx % status_every == 0:
-                loss_t = torch.Tensor([self.base_loss, self.test_loss]).to(self.device)
+                loss_t = torch.Tensor([self.base_loss,
+                                       self.test_loss]).to(self.device)
                 dist.all_reduce(loss_t)
                 loss_t = loss_t / dist.get_world_size()
                 abs_ = abs_diff(loss_t[0], loss_t[1])
                 rel_ = rel_diff(loss_t[0], loss_t[1])
                 if self.global_rank == 0:
-                    print(f'batch={batch_idx} / {num_batches} '
-                          f'base_loss={loss_t[0]:0.5f} test_loss={loss_t[1]:0.5f} '
-                          f'abs_diff={abs_:0.5e} rel_diff={rel_:0.5e}')
-
+                    print(
+                        f'batch={batch_idx} / {num_batches} '
+                        f'base_loss={loss_t[0]:0.5f} test_loss={loss_t[1]:0.5f} '
+                        f'abs_diff={abs_:0.5e} rel_diff={rel_:0.5e}')
 
             # Move on if we're not checking results
             if batch_idx % test_every != 0:
@@ -118,21 +130,23 @@ class ModelStepper:
                         abs_ = abs_diff(base_params[p_idx], test_params[p_idx])
                         rel_ = rel_diff(base_params[p_idx], test_params[p_idx])
                         if rel_ > param_tol:
-                            print(f'ERROR rank={self.global_rank} batch={batch_idx}: '
-                                  f'PARAMETER divergence for param={p_idx} '
-                                  f'abs_diff={abs_:0.5e} rel_diff={rel_:0.5e} '
-                                  f'tol={param_tol:0.5e}')
+                            print(
+                                f'ERROR rank={self.global_rank} batch={batch_idx}: '
+                                f'PARAMETER divergence for param={p_idx} '
+                                f'abs_diff={abs_:0.5e} rel_diff={rel_:0.5e} '
+                                f'tol={param_tol:0.5e}')
                             test_pass = False
 
                 if self.track_loss:
                     abs_ = abs_diff(self.base_loss, self.test_loss)
                     rel_ = rel_diff(self.base_loss, self.test_loss)
                     if rel_ > loss_tol:
-                        print(f'ERROR rank={self.global_rank} batch={batch_idx}: '
-                              f'LOSS divergence '
-                              f'base={self.base_loss:0.5e} test={self.test_loss:0.5e} '
-                              f'abs_diff={abs_:0.5f} rel_diff={rel_:0.5e} '
-                              f'tol={loss_tol:0.5e}')
+                        print(
+                            f'ERROR rank={self.global_rank} batch={batch_idx}: '
+                            f'LOSS divergence '
+                            f'base={self.base_loss:0.5e} test={self.test_loss:0.5e} '
+                            f'abs_diff={abs_:0.5f} rel_diff={rel_:0.5e} '
+                            f'tol={loss_tol:0.5e}')
                         test_pass = False
 
                 if self.track_grads:
@@ -142,10 +156,11 @@ class ModelStepper:
                         abs_ = abs_diff(base_grads[g_idx], test_grads[g_idx])
                         rel_ = rel_diff(base_grads[g_idx], test_grads[g_idx])
                         if rel_ > grad_tol:
-                            print(f'ERROR rank={self.global_rank} batch={batch_idx}: '
-                                  f'GRADIENT divergence for param={g_idx} '
-                                  f'abs_diff={abs_:0.5e} rel_diff={rel_:0.5e} '
-                                  f'tol={grad_tol:0.5e}')
+                            print(
+                                f'ERROR rank={self.global_rank} batch={batch_idx}: '
+                                f'GRADIENT divergence for param={g_idx} '
+                                f'abs_diff={abs_:0.5e} rel_diff={rel_:0.5e} '
+                                f'tol={grad_tol:0.5e}')
                             test_pass = False
 
             status_t = torch.Tensor([test_pass == False]).to(self.device)
@@ -156,36 +171,38 @@ class ModelStepper:
         return True
 
 
-
-
 def cifar_loader(batch_size):
     """Construct DataLoader for CIFAR10 train data. """
     import torchvision
     import torchvision.transforms as transforms
 
-    transform = transforms.Compose(
-        [transforms.ToTensor(),
-         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+    transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+    ])
 
-    trainset = torchvision.datasets.CIFAR10(root='./data', train=True,
-                                            download=True, transform=transform)
-    sampler = torch.utils.data.distributed.DistributedSampler(trainset, shuffle=False)
+    trainset = torchvision.datasets.CIFAR10(root='./data',
+                                            train=True,
+                                            download=True,
+                                            transform=transform)
+    sampler = torch.utils.data.distributed.DistributedSampler(trainset,
+                                                              shuffle=False)
 
-    trainloader = torch.utils.data.DataLoader(
-            trainset,
-            sampler=sampler,
-            batch_size=batch_size,
-            pin_memory=True)
+    trainloader = torch.utils.data.DataLoader(trainset,
+                                              sampler=sampler,
+                                              batch_size=batch_size,
+                                              pin_memory=True)
     return trainloader
 
 
-
 def get_cmd_args():
-    parser=argparse.ArgumentParser(description='CIFAR')
-    parser.add_argument('--local_rank', type=int, default=-1,
-                       help='local rank passed from distributed launcher')
+    parser = argparse.ArgumentParser(description='CIFAR')
+    parser.add_argument('--local_rank',
+                        type=int,
+                        default=-1,
+                        help='local rank passed from distributed launcher')
     parser = deepspeed.add_config_arguments(parser)
-    args=parser.parse_args()
+    args = parser.parse_args()
     return args
 
 
@@ -196,27 +213,27 @@ if __name__ == '__main__':
 
     torch.manual_seed(1138)
     base_net = SimpleNet()
-    base_opt = torch.optim.Adam(base_net.parameters(), betas=(0.9,    0.999))
+    base_opt = torch.optim.Adam(base_net.parameters(), betas=(0.9, 0.999))
 
     base_engine, base_opt, __, __ = deepspeed.initialize(
-            args=args,
-            model=base_net,
-            optimizer=base_opt,
-            model_parameters=base_net.parameters(),
-            dist_init_required=True)
+        args=args,
+        model=base_net,
+        optimizer=base_opt,
+        model_parameters=base_net.parameters(),
+        dist_init_required=True)
 
     torch.manual_seed(1138)
     test_net = SimpleNet()
-    test_net.load_state_dict(base_net.state_dict()) # copy from base
+    test_net.load_state_dict(base_net.state_dict())  # copy from base
     test_opt = torch.optim.Adam(test_net.parameters(), betas=(0.9, 0.999))
     #test_opt = torch.optim.Adam(test_net.parameters(), betas=(0.900001, 0.999))
 
     test_engine, test_opt, __, __ = deepspeed.initialize(
-            args=args,
-            model=test_net,
-            optimizer=test_opt,
-            model_parameters=test_net.parameters(),
-            dist_init_required=False)
+        args=args,
+        model=test_net,
+        optimizer=test_opt,
+        model_parameters=test_net.parameters(),
+        dist_init_required=False)
 
     trainloader = cifar_loader(base_engine.train_micro_batch_size_per_gpu())
 
@@ -228,4 +245,3 @@ if __name__ == '__main__':
         print('TEST PASSED')
     else:
         print('TEST FAILED')
-
