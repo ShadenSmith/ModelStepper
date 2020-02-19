@@ -41,7 +41,7 @@ STATUS batch=49 / 50 base_loss=1.89003 test_loss=1.89003 abs_diff=0.00000e+00 re
 TEST PASSED
 ```
 
-On the other hand, here is the result of the `--fail` flag to demo a test failure. This
+In contrast, here is the result of the `--fail` flag to demo a test failure. This
 mode sets `lr=0` in the tested model:
 ```bash
 $ deepspeed demo.py --deepspeed --deepspeed_config=ds_config.json --fail
