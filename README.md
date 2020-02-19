@@ -2,6 +2,10 @@
 A debugger for DeepSpeed engines. It tracks model parameters, gradients, and loss with
 configurable tolerances.
 
+**Note:** the divergence of parameters and gradients is currently decided by the
+*relative* difference between the tensors, i.e., `((B - A).norm() / A.norm())`. The
+absolute difference is still provided at divergence.
+
 Assumptions:
 * If parameters or gradients are tracked, the models are aligned such
 	`base_eng.module.parameters()` are comparable `test_eng.module.parameters()`.
