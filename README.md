@@ -1,16 +1,40 @@
 # ModelStepper
-A debugger for DeepSpeed engines. It tracks model parameters, gradients, and loss with
-configurable tolerances.
+A debugger for DeepSpeed engines. ModelStepper tracks model parameters, gradients, and
+loss with configurable tolerances.
+
+ModelStepper accepts two training engines as returned from `deepspeed.initialize()` (one
+baseline and one test) and a `DataLoader` for training. ModelStepper's `go()` method will
+train some number of batches and track the specified values (i.e., parameters, loss,
+and/or gradients). If a tracked component diverges from the baseline within a specified
+tolerance, `go()` returns `False` and reports information on the divergence.
 
 **Note:** the divergence of parameters and gradients is currently decided by the
 *relative* difference between the tensors, i.e., `((B - A).norm() / A.norm())`. The
-absolute difference is still provided at divergence.
+absolute difference is still communicated when diverged.
 
 Assumptions:
+* The user must ensure that the baseline and tracked model are initialized with the same
+  state.
 * If parameters or gradients are tracked, the models are aligned such
 	`base_eng.module.parameters()` are comparable `test_eng.module.parameters()`.
 	In the near future, we should support doing an `all_gather()` to coordinate
 	with varying model parallelism.
+
+
+## Usage
+ModelStepper has a small API:
+
+```python
+stepper = ModelStepper(base_engine,
+                       test_engine,
+                       trainloader,
+                       num_batches=50,
+                       test_every=1)
+success = stepper.go()
+```
+
+Check out [demo.py](demo.py) and [ModelStepper.py](ModelStepper.py) for more details.
+
 
 ## Example
 
@@ -60,8 +84,5 @@ STATUS batch=0 / 50 base_loss=2.30138 test_loss=2.30138 abs_diff=0.00000e+00 rel
 TEST FAILED
 ```
 
-ModelStepper immediately detects that the model parameters have diverged from
-the baseline.
-
-## Usage
-Check out [demo.py](demo.py).
+ModelStepper immediately detects that the model parameters have diverged from the
+baseline.
