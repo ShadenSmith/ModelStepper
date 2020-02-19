@@ -1,3 +1,4 @@
+import sys
 import argparse
 import torch
 
@@ -39,6 +40,7 @@ def get_cmd_args():
                         type=int,
                         default=-1,
                         help='local rank passed from distributed launcher')
+    parser.add_argument('--fail', action='store_true', help='demo test failure')
     parser = deepspeed.add_config_arguments(parser)
     args = parser.parse_args()
     return args
@@ -63,10 +65,12 @@ if __name__ == '__main__':
     torch.manual_seed(1138)
     test_net = SimpleNet()
     test_net.load_state_dict(base_net.state_dict())  # copy from base
-    test_opt = torch.optim.Adam(test_net.parameters())
 
     # uncomment this to fail
-    #test_opt = torch.optim.Adam(test_net.parameters(), lr=0.)
+    if not args.fail:
+        test_opt = torch.optim.Adam(test_net.parameters())
+    else:
+        test_opt = torch.optim.Adam(test_net.parameters(), lr=0.)
 
     test_engine, __, __, __ = deepspeed.initialize(
         args=args,
@@ -86,9 +90,9 @@ if __name__ == '__main__':
                            loss_tol=1e-5,
                            track_grads=True,
                            track_params=True)
+    success = stepper.go()
 
-    correct = stepper.go()
-    if correct:
-        print('TEST PASSED')
+    if success:
+        sys.exit(0)
     else:
-        print('TEST FAILED')
+        sys.exit(1)

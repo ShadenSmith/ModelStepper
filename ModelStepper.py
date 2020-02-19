@@ -33,9 +33,9 @@ class ModelStepper:
                  track_params=True,
                  track_loss=True,
                  track_grads=True,
-                 param_tol=1e-5,
-                 loss_tol=1e-5,
-                 grad_tol=1e-5,
+                 param_tol=1e-4,
+                 loss_tol=1e-4,
+                 grad_tol=1e-4,
                  batch_data_fn=None):
         """A correctness checker for DeepSpeed.
 
@@ -82,12 +82,14 @@ class ModelStepper:
             print()
 
     def _get_params(self):
+        # TODO; if models do not use identical model parallelism, a gather should be used
         base_params = [p for p in self.base_eng.module.parameters() if p.requires_grad]
         test_params = [p for p in self.test_eng.module.parameters() if p.requires_grad]
         assert len(base_params) == len(test_params)
         return base_params, test_params
 
     def _get_grads(self):
+        # TODO; if models do not use identical model parallelism, a gather should be used
         base_grads = [p for p in self.base_eng.module.parameters() if p.requires_grad]
         test_grads = [p for p in self.test_eng.module.parameters() if p.requires_grad]
         assert len(base_grads) == len(test_grads)
@@ -98,22 +100,22 @@ class ModelStepper:
         self.test_eng.optimizer.zero_grad()
 
         # Should we test parameters/loss/gradients this batch?
-        test_batch = (batch_idx % self.test_every == 0)
+        test_batch = (batch_idx %
+                      self.test_every == 0) or (batch_idx == self.num_batches - 1)
 
         # Forward pass
         self.base_loss = self.base_eng.module(*base_batch_data)
         self.test_loss = self.test_eng.module(*test_batch_data)
 
         if test_batch and self.track_loss:
-            with torch.no_grad():
-                abs_ = abs_diff(self.base_loss, self.test_loss)
-                rel_ = rel_diff(self.base_loss, self.test_loss)
-                if rel_ > self.loss_tol:
-                    print(f'DIVERGED LOSS rank={self.global_rank} batch={batch_idx}: '
-                          f'base={self.base_loss:0.5e} test={self.test_loss:0.5e} '
-                          f'abs_diff={abs_:0.5f} rel_diff={rel_:0.5e} '
-                          f'tol={self.loss_tol:0.5e}')
-                    return False
+            abs_ = abs_diff(self.base_loss, self.test_loss)
+            rel_ = rel_diff(self.base_loss, self.test_loss)
+            if rel_ > self.loss_tol:
+                print(f'DIVERGED LOSS rank={self.global_rank} batch={batch_idx}: '
+                      f'base={self.base_loss:0.5e} test={self.test_loss:0.5e} '
+                      f'abs_diff={abs_:0.5f} rel_diff={rel_:0.5e} '
+                      f'tol={self.loss_tol:0.5e}')
+                return False
 
         # Backward pass
         self.base_eng.backward(self.base_loss)
@@ -152,9 +154,21 @@ class ModelStepper:
 
         return True
 
+    def _print_status(self, batch_idx):
+        loss_t = torch.Tensor([self.base_loss, self.test_loss]).to(self.device)
+        dist.all_reduce(loss_t)
+        loss_t = loss_t / dist.get_world_size()
+        abs_ = abs_diff(loss_t[0], loss_t[1])
+        rel_ = rel_diff(loss_t[0], loss_t[1])
+        if self.global_rank == 0:
+            print(f'STATUS batch={batch_idx} / {self.num_batches} '
+                  f'base_loss={loss_t[0]:0.5f} test_loss={loss_t[1]:0.5f} '
+                  f'abs_diff={abs_:0.5e} rel_diff={rel_:0.5e}')
+
     def go(self):
         for batch_idx, data in enumerate(self.loader):
             if batch_idx == self.num_batches:
+                self._print_status(batch_idx)
                 break
 
             # Prepare identical baseline and test data
@@ -176,20 +190,14 @@ class ModelStepper:
             status_t = torch.Tensor([test_pass == False]).to(self.device)
             dist.all_reduce(status_t)
             if status_t[0] > 0:
+                self._print_status(batch_idx)
+                if self.global_rank == 0:
+                    print('TEST FAILED')
                 return False
 
-            with torch.no_grad():
-                if (batch_idx == self.num_batches - 1) or (batch_idx %
-                                                           self.status_every == 0):
-                    loss_t = torch.Tensor([self.base_loss,
-                                           self.test_loss]).to(self.device)
-                    dist.all_reduce(loss_t)
-                    loss_t = loss_t / dist.get_world_size()
-                    abs_ = abs_diff(loss_t[0], loss_t[1])
-                    rel_ = rel_diff(loss_t[0], loss_t[1])
-                    if self.global_rank == 0:
-                        print(f'STATUS batch={batch_idx} / {self.num_batches} '
-                              f'base_loss={loss_t[0]:0.5f} test_loss={loss_t[1]:0.5f} '
-                              f'abs_diff={abs_:0.5e} rel_diff={rel_:0.5e}')
+            if batch_idx % self.status_every == 0:
+                self._print_status(batch_idx)
 
+        if self.global_rank == 0:
+            print('TEST PASSED')
         return True
